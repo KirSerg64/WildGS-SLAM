@@ -1,0 +1,46 @@
+<pr_title>
+Document custom-video support and provide implementation plan for WildGS-SLAM
+</pr_title>
+
+<pr_description>
+The issue was to determine whether WildGS-SLAM can run on arbitrary user videos and, if so, define a concrete implementation path.
+This update confirms support exists in the current codebase and provides an execution-ready plan focused on data layout, config wiring, and runtime parameters.
+
+- **Capability assessment**
+  - Confirmed custom-video path is already supported via:
+    - `configs/Custom/custom_template.yaml`
+    - `dataset: 'wild_slam_iphone'` (`RGB_NoPose` loader in `src/utils/datasets.py`)
+    - README section “Your own dataset”
+  - Clarified that RGB-only input is valid (no GT pose/depth required).
+
+- **Implementation plan (operator-facing)**
+  - Standardized required input structure: `.../rgb/frame*.png`
+  - Defined required config edits: `scene`, `data.input_folder`, `data.output`, camera intrinsics (`H/W/fx/fy/cx/cy`)
+  - Added practical tuning guidance for memory/runtime stability (`H_out/W_out`, `fast_mode`, depth weighting).
+
+- **Run contract**
+  - Explicitly documented single-command execution path from config:
+    - `python run.py <custom_config.yaml>`
+  - Clarified expected output location and behavior for no-pose datasets.
+
+```yaml
+# configs/Custom/my_scene.yaml
+inherit_from: ./configs/wildgs_slam.yaml
+scene: my_scene
+
+dataset: 'wild_slam_iphone'
+data:
+  input_folder: /abs/path/to/my_data   # contains rgb/frame00000.png, ...
+  output: ./output/Custom
+
+cam:
+  H: 1080
+  W: 1920
+  H_out: 360
+  W_out: 480
+  fx: 1340.0
+  fy: 1340.0
+  cx: 960.0
+  cy: 540.0
+```
+</pr_description>
