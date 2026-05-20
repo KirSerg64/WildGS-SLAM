@@ -20,11 +20,21 @@ def setup_seed(seed):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config', type=str, help='Path to config file.')
+    parser.add_argument(
+        '--video', type=str, default=None,
+        help='Path to a video file. Overrides data.input_folder in the config '
+             'and forces dataset type to "video".',
+    )
     args = parser.parse_args()
 
     torch.multiprocessing.set_start_method('spawn')
 
     cfg = config.load_config(args.config)
+
+    if args.video is not None:
+        cfg['data']['input_folder'] = args.video
+        cfg['dataset'] = 'video'
+
     setup_seed(cfg['setup_seed'])
     if cfg['fast_mode']:
         # Force the final refine iterations to be 3000 if in fast mode

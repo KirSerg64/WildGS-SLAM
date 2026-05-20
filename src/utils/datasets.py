@@ -472,6 +472,111 @@ class RGB_NoPose(BaseDataset):
         self.color_paths = self.color_paths[:max_frames][::stride]
         self.n_img = len(self.color_paths)
 
+
+class VideoDataset(BaseDataset):
+    """Dataset that reads frames directly from a video file using cv2.VideoCapture.
+
+    Frames are decoded on demand (seek-based access), so no frames are ever
+    written to a temporary directory.  The video file path is taken from
+    ``cfg['data']['input_folder']``.
+    """
+
+    def __init__(self, cfg, device='cuda:0'):
+        super(VideoDataset, self).__init__(cfg, device)
+        self.depth_paths = None
+        self.poses = None
+
+        video_path = self.input_folder
+        self.cap = cv2.VideoCapture(video_path)
+        if not self.cap.isOpened():
+            raise FileNotFoundError(f"Cannot open video file: {video_path}")
+
+        total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        stride = cfg['stride']
+        max_frames = cfg['max_frames']
+        if max_frames < 0:
+            max_frames = total_frames
+
+        # Build the list of raw video frame indices that will be used.
+        all_indices = list(range(min(max_frames, total_frames)))
+        self.frame_indices = all_indices[::stride]
+        self.n_img = len(self.frame_indices)
+
+    def _read_frame(self, index):
+        """Seek to the video frame for dataset index *index* and return it as a
+        BGR numpy array (uint8, shape H×W×3)."""
+        video_frame_idx = self.frame_indices[index]
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, video_frame_idx)
+        ret, frame = self.cap.read()
+        if not ret:
+            raise RuntimeError(
+                f"Failed to read frame {video_frame_idx} from video."
+            )
+        return frame  # BGR uint8
+
+    def get_color(self, index):
+        color_data_fullsize = self._read_frame(index)
+
+        if self.distortion is not None:
+            K = np.eye(3)
+            K[0, 0], K[0, 2], K[1, 1], K[1, 2] = (
+                self.fx_orig, self.cx_orig, self.fy_orig, self.cy_orig
+            )
+            color_data_fullsize = cv2.undistort(color_data_fullsize, K, self.distortion)
+
+        color_data = cv2.resize(color_data_fullsize, (self.W_out_with_edge, self.H_out_with_edge))
+        color_data = torch.from_numpy(color_data).float().permute(2, 0, 1)[[2, 1, 0], :, :] / 255.0
+        color_data = color_data.unsqueeze(dim=0)  # [1, 3, H, W]
+
+        if self.W_edge > 0:
+            edge = self.W_edge
+            color_data = color_data[:, :, :, edge:-edge]
+
+        if self.H_edge > 0:
+            edge = self.H_edge
+            color_data = color_data[:, :, edge:-edge, :]
+
+        return color_data
+
+    def get_color_full_resol(self, index):
+        color_data_fullsize = self._read_frame(index)
+
+        if self.distortion is not None:
+            K = np.eye(3)
+            K[0, 0], K[0, 2], K[1, 1], K[1, 2] = (
+                self.fx_orig, self.cx_orig, self.fy_orig, self.cy_orig
+            )
+            color_data_fullsize = cv2.undistort(color_data_fullsize, K, self.distortion)
+
+        color_data_fullsize = (
+            torch.from_numpy(color_data_fullsize)
+            .float()
+            .permute(2, 0, 1)[[2, 1, 0], :, :]
+            / 255.0
+        )
+        color_data_fullsize = color_data_fullsize.unsqueeze(dim=0)  # [1, 3, H, W]
+
+        if self.W_edge_full > 0:
+            edge = self.W_edge_full
+            color_data_fullsize = color_data_fullsize[:, :, :, edge:-edge]
+
+        if self.H_edge_full > 0:
+            edge = self.H_edge_full
+            color_data_fullsize = color_data_fullsize[:, :, edge:-edge, :]
+
+        return color_data_fullsize
+
+    def __getitem__(self, index):
+        color_data = self.get_color(index)
+        depth_data = torch.zeros(color_data.shape[-2:])
+        return index, color_data, depth_data, None
+
+    def __del__(self):
+        if hasattr(self, 'cap') and self.cap is not None:
+            self.cap.release()
+
+
 dataset_dict = {
     "replica": Replica,
     "scannet": ScanNet,
@@ -479,5 +584,6 @@ dataset_dict = {
     "bonn_dynamic": TUM_RGBD,
     "wild_slam_mocap": TUM_RGBD,
     "7scenes": SevenScenes,
-    "wild_slam_iphone": RGB_NoPose
+    "wild_slam_iphone": RGB_NoPose,
+    "video": VideoDataset,
 }

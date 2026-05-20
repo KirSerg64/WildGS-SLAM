@@ -1,0 +1,58 @@
+inherit_from: ./configs/wildgs_slam.yaml
+
+scene: video_scene  # Replace with a descriptive name for your video
+
+dataset: 'video'
+
+data:
+  # Path to the input video file (e.g., MP4, AVI).  The SLAM system reads
+  # frames directly from the file using OpenCV — no frames are saved to disk.
+  input_folder: ./datasets/my_video.mp4
+  output: ./output/Custom
+
+cam:
+  # ── Original camera resolution ──────────────────────────────────────────
+  # Set H and W to the native resolution of your video.
+  H: 1080
+  W: 1920
+
+  # ── Camera intrinsics (in pixels, at native resolution) ─────────────────
+  # Obtain these from the camera calibration of your capture device.
+  fx: 1000.0
+  fy: 1000.0
+  cx: 960.0
+  cy: 540.0
+
+  # ── Target / output resolution ──────────────────────────────────────────
+  # Frames are resized to (H_out, W_out) for tracking and mapping.
+  # Smaller values speed up processing; typical values are 360×640.
+  H_out: 360
+  W_out: 640
+
+  # ── Edge cropping (optional) ─────────────────────────────────────────────
+  # Uncomment and set if your video has invalid pixels near the border.
+  # H_edge: 0
+  # W_edge: 0
+
+  # ── Lens distortion (optional) ───────────────────────────────────────────
+  # Uncomment if your camera has radial/tangential distortion.
+  # Coefficients follow the OpenCV convention: [k1, k2, p1, p2, k3].
+  # distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+mapping:
+  Training:
+    # Increase this value (towards 1.0) to weight the RGB loss more than the
+    # depth loss — useful when metric depth estimation is noisy.
+    alpha: 0.8
+  uncertainty_params:
+    # For videos where metric depth estimation is unreliable (e.g., outdoor),
+    # lower this value to 0.1 or even 0.0.
+    uncer_depth_mult: 0.2
+
+# # Uncomment to enable fast mode (fewer refinement iterations) and the GUI:
+# fast_mode: True
+# gui: True
+
+# # Uncomment to save per-frame rendered images during mapping:
+# mapping:
+#   online_plotting: True
