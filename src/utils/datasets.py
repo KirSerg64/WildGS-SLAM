@@ -315,7 +315,7 @@ class TUM_RGBD(BaseDataset):
     def parse_list(self, filepath, skiprows=0):
         """ read list data """
         data = np.loadtxt(filepath, delimiter=' ',
-                          dtype=np.unicode_, skiprows=skiprows)
+                          dtype=np.str_, skiprows=skiprows)
         return data
 
     def associate_frames(self, tstamp_image, tstamp_depth, tstamp_pose, max_dt=0.08):
@@ -422,7 +422,7 @@ class SevenScenes(BaseDataset):
             glob.glob(f'{self.input_folder}/seq-01/*.depth.png'))
         
         scene_name = os.path.basename(self.input_folder)
-        pose_data = np.loadtxt(os.path.join(self.input_folder, f'../{scene_name}.txt'),dtype=np.unicode_)
+        pose_data = np.loadtxt(os.path.join(self.input_folder, f'../{scene_name}.txt'),dtype=np.str_)
         pose_vecs = pose_data[:, 1:].astype(np.float64)
         self.poses = []
         assert len(self.color_paths) == len(pose_vecs), "Number of images and poses do not match"
