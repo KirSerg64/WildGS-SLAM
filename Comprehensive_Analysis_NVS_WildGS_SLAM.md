@@ -35,7 +35,7 @@ Create `src/utils/datasets_nvs.py` with a `NVSCompetitionDataset` class that:
 
 1. Reads `meta.json` to get `target_camera`, `poses_c2w`, `intrinsics`, `delta_s`.
 2. Loads the 12 input images from `input/t0/` and `input/t1/`.
-3. Applies distortion correction (`cv2.undistort`) using each camera's `distortion_coeffs`.
+3. ~~Applies distortion correction~~ → **Not needed** (PINHOLE model, no distortion).
 4. Converts `poses_c2w` (camera-to-world) to `w2c` (world-to-camera) for the GS renderer.
 5. Returns a list of `Camera` objects (one per input view) ready for the mapper.
 
@@ -217,7 +217,6 @@ Line 98 applies `cv2.undistort()` to GT images before metric computation — con
 | `GaussianModel.load_ply()` | `eval_map/nvs_wild_slam.py` L74–75 | Load optimized model after training |
 | `get_render_pipline_params()` | `eval_map/utils.py` | Load pipeline params from config |
 | PSNR/SSIM calculation | `eval_map/nvs_wild_slam.py` L106–108 | Local evaluation on train split |
-| `cv2.undistort` pattern | `eval_map/nvs_wild_slam.py` L98 | Undistort input and GT images |
 
 ---
 
@@ -250,9 +249,9 @@ Line 98 applies `cv2.undistort()` to GT images before metric computation — con
 | Dynamic objects (cars, pedestrians) in input views | Use uncertainty MLP or simple temporal consistency mask |
 | Large scene scale (60 m radius) | Voxel-downsample LiDAR; adjust `scene_extent` in config |
 | Limited views (12 images) for GS optimization | LiDAR initialization; lower SH degree; regularization |
-| Time budget per sample (inference) | `fast_mode: True`; cap to 1000 iters; half-resolution optimization |
 | Sky/background not covered by LiDAR | Add background Gaussians at large radius or use SkyBox |
-| Distortion in input images | `cv2.undistort` before passing to the GS renderer |
+| Target at arbitrary time between t0/t1 | Interpolate dynamic objects; static scene dominates |
+| 3.5M LiDAR points too many for GPU | Voxel downsample to ~200k–500k points |
 
 ---
 
@@ -269,9 +268,9 @@ Line 98 applies `cv2.undistort()` to GT images before metric computation — con
 
 | Metric | Target | Approach |
 |--------|--------|----------|
-| PSNR | 25–28 dB | LiDAR init + 12-view optimization |
-| Inference time | 30–60s per sample | 1000 iters, half-res optimization |
-| GPU memory | <12 GB | ≤500k initial Gaussians, SH degree 0 |
+| PSNR | 25–30 dB | LiDAR init + 12-view optimization, more iterations |
+| Inference time | 2–5 min per sample (no constraint) | 3000–5000 iters, full-res optimization |
+| GPU memory | <12 GB | Voxel-downsample to ≤500k Gaussians, SH degree 0 |
 
 ---
 
@@ -284,7 +283,7 @@ mapping:
   Training:
     ssim_loss: True
     alpha: 1.0              # no depth loss (LiDAR provides geometry)
-    mapping_itr_num: 1000
+    mapping_itr_num: 3000
     gaussian_update_every: 100
     gaussian_th: 0.7
     gaussian_extent: 1.0
@@ -325,9 +324,9 @@ Two strategies, from simple to advanced:
 |------|-----------|
 | Sky not covered by LiDAR | Add background plane Gaussians at z=100m behind all cameras |
 | Dynamic objects in input views | Temporal consistency check + uncertainty MLP |
-| Distortion model mismatch | Apply `cv2.undistort()` to all inputs before processing |
 | 12 views insufficient for convergence | LiDAR provides geometry; optimization only learns appearance |
 | Large scenes (highway) | Increase voxel size; filter points by frustum of target camera |
+| Target at non-midpoint time | Use timestamp ratio `(t_target - t0) / (t1 - t0)` for motion interpolation |
 
 ---
 
@@ -343,3 +342,87 @@ The implementation requires:
 3. A pose-supervised optimization loop (no tracker)
 4. Target view rendering (reusing existing code)
 5. A batch inference entry-point script
+
+---
+
+## Clarified Assumptions (Answers to Open Questions)
+
+| # | Question | Answer |
+|---|----------|--------|
+| 1 | Camera distortion model? | **No distortion** — all cameras use PINHOLE model with empty `distortion_coeffs`. No `cv2.undistort()` needed. |
+| 2 | Target time relative to t0/t1? | **Any time between t0 and t1** (not necessarily the midpoint). The exact timestamp is in `meta.json` → `timestamps_ns.target`. |
+| 3 | Time constraints? | **No strict time constraints** — just feasible execution time across the full dataset. Can run more optimization iterations. |
+| 4 | LiDAR format? | **Dense raw point cloud** — `lidar.npz` contains `xyz` array with ~3.5M points (aggregated from ~21 sweeps in a 3× extended window around [t0, t1]). |
+| 5 | Ground-truth availability? | **Available for train dataset** at `data/train/<sample_id>/target/<camera_name>.jpg`. GT pose is between cameras at the interpolated time. |
+
+### Implications for Implementation
+
+- **Simplification**: Remove all distortion handling code (`cv2.undistort` calls) — images can be used directly.
+- **More iterations**: No time budget means we can run 2000–5000 optimization iterations for better quality.
+- **Dense initialization**: 3.5M LiDAR points provides extremely strong geometry; voxel downsample to ~200k–500k for GPU memory.
+- **Temporal interpolation**: Target time varies per sample — must handle arbitrary t ∈ [t0, t1], not just midpoint.
+- **Validation**: Can compute PSNR locally using GT images from the train split.
+
+---
+
+## Actual Data Format (from `data/train/` example)
+
+### Directory Structure
+```
+data/train/<sample_id>/
+├── meta.json           # all metadata (poses, intrinsics, timestamps)
+├── input/
+│   ├── lidar.npz       # dense point cloud (~3.5M points, xyz in world frame)
+│   ├── t0/             # 6 camera images at time t0
+│   │   ├── front.jpg
+│   │   ├── left_fwd.jpg
+│   │   ├── left_bwd.jpg
+│   │   ├── right_fwd.jpg
+│   │   ├── right_bwd.jpg
+│   │   └── rear.jpg
+│   └── t1/             # 6 camera images at time t1
+│       ├── front.jpg
+│       ├── ...
+│       └── rear.jpg
+└── target/             # ground-truth (train only)
+    └── <target_camera>.jpg   # e.g., left_fwd.jpg
+```
+
+### `meta.json` Key Fields
+```json
+{
+  "sample_id": "...",
+  "delta_s": 1.0,                    // time delta between t0 and t1 in seconds
+  "target_camera": "left_fwd",       // which camera to render
+  "frame_convention": "poses are camera-to-world (OpenCV: x-right, y-down, z-forward)",
+  "lidar_info": {
+    "n_points": 3548884,             // ~3.5M dense points
+    "n_sweeps": 21                   // aggregated from 21 LiDAR sweeps
+  },
+  "timestamps_ns": {
+    "t0": 1759586461631681000,
+    "t1": 1759586462631688000,
+    "target": 1759586462131660000    // target time (between t0 and t1)
+  },
+  "intrinsics": {
+    "<camera_name>": {
+      "fx": ..., "fy": ..., "cx": ..., "cy": ...,
+      "width": 1024, "height": 540-548,
+      "distortion_model": "PINHOLE",
+      "distortion_coeffs": []        // always empty — no distortion
+    }
+  },
+  "poses_c2w": {
+    "t0": { "<camera_name>": [[4x4 matrix]] },
+    "t1": { "<camera_name>": [[4x4 matrix]] },
+    "target": { "<target_camera>": [[4x4 matrix]] }
+  }
+}
+```
+
+### Key Observations from Real Data
+- **6 cameras**: front, left_fwd, left_bwd, right_fwd, right_bwd, rear
+- **Resolution**: ~1024×540–548 (varies by camera)
+- **World frame**: SDG world_3d, derived from car_frame FLU (forward-left-up)
+- **LiDAR coverage**: 3× extended window (one delta before t0, one after t1)
+- **Target pose**: Only one camera in `poses_c2w.target` (the `target_camera` specified)
