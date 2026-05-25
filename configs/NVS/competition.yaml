@@ -1,0 +1,52 @@
+# NVS Competition config — pose-supervised Gaussian optimization from LiDAR + 12 views
+# No tracking needed; poses are given.
+
+mapping:
+  full_resolution: True
+  pcd_downsample: 1       # not used for LiDAR init
+  pcd_downsample_init: 1
+  adaptive_pointsize: False
+  point_size: 0.01
+
+  Training:
+    ssim_loss: True
+    alpha: 1.0              # pure RGB loss (geometry from LiDAR)
+    mapping_itr_num: 2000   # iterations per sample
+    init_itr_num: 2000
+    init_gaussian_update: 100
+    init_gaussian_reset: 500
+    init_gaussian_th: 0.005
+    init_gaussian_extent: 30
+    gaussian_update_every: 150
+    gaussian_update_offset: 0
+    gaussian_th: 0.5
+    gaussian_extent: 1.0
+    gaussian_reset: 20001
+    size_threshold: 20
+    window_size: 12
+    edge_threshold: 4
+    rgb_boundary_threshold: 0.01
+    spherical_harmonics: False
+
+  opt_params:
+    position_lr_init: 0.00016
+    position_lr_final: 0.0000016
+    position_lr_delay_mult: 0.01
+    position_lr_max_steps: 30000
+    feature_lr: 0.0025
+    opacity_lr: 0.05
+    scaling_lr: 0.005
+    rotation_lr: 0.001
+    percent_dense: 0.01
+    lambda_dssim: 0.2
+    densification_interval: 100
+    opacity_reset_interval: 300
+    densify_until_iter: 1500
+    densify_grad_threshold: 0.0002
+
+  model_params:
+    sh_degree: 0
+
+  pipeline_params:
+    convert_SHs_python: False
+    compute_cov3D_python: False
