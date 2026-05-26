@@ -131,7 +131,10 @@ def main():
         print(f"\n[{i+1}/{len(sample_dirs)}] ", end="")
         t0 = time.time()
         try:
-            process_sample(sample_dir, args.output_dir, cfg, device=args.device)
+            process_sample(
+                sample_dir, args.output_dir, cfg, device=args.device,
+                voxel_size=args.voxel_size, max_points=args.max_points,
+            )
         except Exception as e:
             print(f"  ERROR processing {sample_dir}: {e}")
             import traceback

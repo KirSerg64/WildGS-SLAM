@@ -354,7 +354,7 @@ def render_target_view(gaussians, meta, cfg, device="cuda"):
     return output_rgb
 
 
-def process_sample(sample_dir, output_dir, cfg, device="cuda"):
+def process_sample(sample_dir, output_dir, cfg, device="cuda", voxel_size=0.15, max_points=300000):
     """Process a single competition sample end-to-end.
 
     Args:
@@ -362,6 +362,8 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda"):
         output_dir: path to save predictions
         cfg: config dict
         device: torch device
+        voxel_size: voxel downsampling size in meters for LiDAR init
+        max_points: maximum number of LiDAR points to keep
 
     Returns:
         sample_id: str
@@ -395,7 +397,7 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda"):
     # Initialize Gaussians from LiDAR
     gaussians = initialize_gaussians_from_lidar(
         lidar_xyz, lidar_intensity, cfg=cfg,
-        voxel_size=0.15, max_points=300000, device=device,
+        voxel_size=voxel_size, max_points=max_points, device=device,
     )
 
     # Optimize
