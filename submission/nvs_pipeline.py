@@ -197,17 +197,18 @@ def initialize_gaussians_from_lidar(
 
     dist2 = torch.clamp_min(
         distCUDA2(fused_point_cloud), 0.0000001
-    ) * 0.01  # small initial scale
-
+    )
+    # Scale factor: use sqrt of kNN distance as Gaussian radius
+    # For voxel_size=0.1m, this gives roughly 0.05-0.2m per Gaussian
     scales = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
 
     # Identity rotations
     rots = torch.zeros((len(points), 4), device=device)
     rots[:, 0] = 1.0
 
-    # Opacity initialized to 0.5
+    # Opacity initialized to 0.9 — high so Gaussians survive early pruning
     opacities = inverse_sigmoid(
-        0.5 * torch.ones((len(points), 1), dtype=torch.float32, device=device)
+        0.9 * torch.ones((len(points), 1), dtype=torch.float32, device=device)
     )
 
     # Set parameters
@@ -394,7 +395,7 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda"):
     # Initialize Gaussians from LiDAR
     gaussians = initialize_gaussians_from_lidar(
         lidar_xyz, lidar_intensity, cfg=cfg,
-        voxel_size=0.1, max_points=500000, device=device,
+        voxel_size=0.15, max_points=300000, device=device,
     )
 
     # Optimize
