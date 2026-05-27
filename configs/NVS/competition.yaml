@@ -11,7 +11,7 @@ mapping:
   Training:
     ssim_loss: True
     alpha: 1.0              # pure RGB loss (geometry from LiDAR)
-    mapping_itr_num: 2000   # iterations per sample
+    mapping_itr_num: 3000   # iterations per sample
     init_itr_num: 2000
     init_gaussian_update: 100
     init_gaussian_reset: 500
@@ -23,22 +23,22 @@ mapping:
     gaussian_extent: 50.0   # outdoor scene extent ~50m; prune Gaussians with scale > 0.1*extent
     gaussian_reset: 20001   # effectively disable opacity reset during densification
     size_threshold: 20
-    window_size: 12
+    window_size: 32
     edge_threshold: 4
     rgb_boundary_threshold: 0.01
     spherical_harmonics: False
 
   opt_params:
-    position_lr_init: 0.00016
-    position_lr_final: 0.0000016
+    position_lr_init: 0.0016
+    position_lr_final: 0.000016
     position_lr_delay_mult: 0.01
-    position_lr_max_steps: 30000
+    position_lr_max_steps: 3000
     feature_lr: 0.0025
     opacity_lr: 0.05
     scaling_lr: 0.005
     rotation_lr: 0.001
     percent_dense: 0.01
-    lambda_dssim: 0.2
+    lambda_dssim: 0.8
     densification_interval: 200     # densify less frequently to allow gradients to accumulate
     opacity_reset_interval: 30000   # effectively disabled — never reset opacity
     densify_until_iter: 1000        # stop densification earlier, let optimization converge

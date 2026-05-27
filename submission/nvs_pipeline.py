@@ -31,6 +31,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from submission.utils import cameras_may_intersect
 from thirdparty.gaussian_splatting.gaussian_renderer import render
 from thirdparty.gaussian_splatting.scene.gaussian_model import GaussianModel
 from thirdparty.gaussian_splatting.utils.graphics_utils import (
@@ -42,6 +43,23 @@ from thirdparty.gaussian_splatting.utils.sh_utils import RGB2SH
 from thirdparty.gaussian_splatting.utils.general_utils import inverse_sigmoid
 from src.utils.camera_utils import Camera
 
+
+def gamma_correction(image, gamma=2.2):
+    """Apply gamma correction to an image.
+
+    Args:
+        image: np.ndarray (H, W, 3) uint8 RGB image
+        gamma: gamma value (default 2.2)
+
+    Returns:
+        np.ndarray (H, W, 3) uint8 RGB image after gamma correction
+    """
+    img_ycrcb = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)
+    clache = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    img_ycrcb[:, :, 0] = clache.apply(img_ycrcb[:, :, 0])
+    img_rgb = cv2.cvtColor(img_ycrcb, cv2.COLOR_YCrCb2RGB)
+    img_rgb = np.power(img_rgb / 255.0, gamma) * 255    
+    return img_rgb.astype(np.uint8)
 
 def load_config():
     """Load the NVS competition config."""
@@ -319,12 +337,16 @@ def optimize_gaussians(gaussians, viewpoints, cfg, device="cuda"):
                   f"n_gaussians={gaussians.get_xyz.shape[0]}")
 
 
-def render_target_view(gaussians, meta, cfg, device="cuda"):
+def render_target_view(gaussians, viewpoint, target_intrinsics, cfg, device="cuda"):
     """Render the target view and return as uint8 RGB numpy array.
 
     Args:
         gaussians: optimized GaussianModel
-        meta: meta.json dict
+        viewpoint: target Camera object
+        target_intrinsics: target camera intrinsics
+        cfg: config dict
+        device: torch device
+
         cfg: config dict
         device: torch device
 
@@ -333,12 +355,6 @@ def render_target_view(gaussians, meta, cfg, device="cuda"):
     """
     pipe = munchify(cfg["mapping"]["pipeline_params"])
     background = torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device=device)
-
-    target_camera_name = meta["target_camera"]
-    target_intrinsics = meta["intrinsics"][target_camera_name]
-    target_pose_c2w = np.array(meta["poses_c2w"]["target"][target_camera_name], dtype=np.float64)
-
-    viewpoint = make_viewpoint(target_intrinsics, target_pose_c2w, image_rgb=None, uid=99, device=device)
 
     with torch.no_grad():
         render_pkg = render(viewpoint, gaussians, pipe, background)
@@ -373,8 +389,16 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda", voxel_size=0.15, 
     sample_id = meta["sample_id"]
     print(f"Processing sample: {sample_id}")
 
+    # Build target viewpoint for later rendering
+    target_camera_name = meta["target_camera"]
+    target_intrinsics = meta["intrinsics"][target_camera_name]
+    target_pose_c2w = np.array(meta["poses_c2w"]["target"][target_camera_name], dtype=np.float64)
+
+    target_viewpoint = make_viewpoint(target_intrinsics, target_pose_c2w, image_rgb=None, uid=99, device=device)
+    
     # Build input viewpoints
     viewpoints = []
+    close2target_views = []
     uid = 0
     for t in ["t0", "t1"]:
         poses = meta["poses_c2w"][t]
@@ -390,9 +414,11 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda", voxel_size=0.15, 
 
             viewpoint = make_viewpoint(intrinsics, pose_c2w, image_rgb=img_rgb, uid=uid, device=device)
             viewpoints.append(viewpoint)
+            if cameras_may_intersect(viewpoint, target_viewpoint):
+                close2target_views.append(viewpoint)
             uid += 1
 
-    print(f"  Loaded {len(viewpoints)} input viewpoints")
+    print(f"  Loaded {len(viewpoints)} input viewpoints, {len(close2target_views)} intersecting target FOV")
 
     # Initialize Gaussians from LiDAR
     gaussians = initialize_gaussians_from_lidar(
@@ -401,10 +427,10 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda", voxel_size=0.15, 
     )
 
     # Optimize
-    optimize_gaussians(gaussians, viewpoints, cfg, device=device)
+    optimize_gaussians(gaussians, close2target_views, cfg, device=device)
 
     # Render target
-    output_rgb = render_target_view(gaussians, meta, cfg, device=device)
+    output_rgb = render_target_view(gaussians, target_viewpoint, target_intrinsics, cfg, device=device)
 
     # Save prediction
     os.makedirs(output_dir, exist_ok=True)
@@ -414,7 +440,7 @@ def process_sample(sample_dir, output_dir, cfg, device="cuda", voxel_size=0.15, 
     print(f"  Saved: {output_path}")
 
     # Cleanup GPU memory
-    del gaussians, viewpoints
+    del gaussians, viewpoints, close2target_views, target_viewpoint
     torch.cuda.empty_cache()
 
     return sample_id
